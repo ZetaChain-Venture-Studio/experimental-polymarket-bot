@@ -25,7 +25,7 @@ export default function SettlementLog() {
     );
   }
 
-  const settlementsList = settlements || [];
+  const settlementsList = settlements?.settlements || [];
 
   const formatDate = (dateStr) => {
     if (!dateStr) return 'N/A';

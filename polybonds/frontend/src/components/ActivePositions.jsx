@@ -27,7 +27,7 @@ export default function ActivePositions() {
     );
   }
 
-  const positionsList = positions || [];
+  const positionsList = positions?.positions || [];
 
   return (
     <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">

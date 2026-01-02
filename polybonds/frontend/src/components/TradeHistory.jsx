@@ -25,7 +25,7 @@ export default function TradeHistory() {
     );
   }
 
-  const tradesList = trades || [];
+  const tradesList = trades?.trades || [];
 
   const formatTime = (dateStr) => {
     if (!dateStr) return 'N/A';

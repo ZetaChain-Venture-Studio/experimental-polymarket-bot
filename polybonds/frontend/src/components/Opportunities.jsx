@@ -56,7 +56,7 @@ export default function Opportunities() {
     );
   }
 
-  const oppList = opportunities || [];
+  const oppList = opportunities?.opportunities || [];
 
   return (
     <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
