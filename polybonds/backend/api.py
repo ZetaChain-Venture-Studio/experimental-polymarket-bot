@@ -5,7 +5,10 @@ Provides REST endpoints for the dashboard and external integrations.
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
+import os
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import logging
@@ -481,3 +484,35 @@ async def shutdown_event():
     """Cleanup on shutdown."""
     logger.info("Polybonds API server shutting down...")
     client.close()
+
+
+# ===========================================
+# STATIC FILE SERVING (Frontend)
+# ===========================================
+
+# Get the path to the frontend dist folder
+FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "dist")
+
+# Serve static assets if frontend is built
+if os.path.exists(FRONTEND_DIR):
+    app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_DIR, "assets")), name="assets")
+
+    @app.get("/", include_in_schema=False)
+    async def serve_frontend():
+        """Serve the frontend dashboard."""
+        return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_frontend_routes(full_path: str):
+        """Serve frontend for all non-API routes (SPA support)."""
+        # Don't catch API routes
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not found")
+
+        # Check if it's a static file
+        file_path = os.path.join(FRONTEND_DIR, full_path)
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            return FileResponse(file_path)
+
+        # Return index.html for SPA routing
+        return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
