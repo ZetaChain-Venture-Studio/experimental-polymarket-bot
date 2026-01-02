@@ -61,6 +61,9 @@ python run.py trade
 
 # Start web API
 python run.py server
+
+# Start automated scheduler
+python run.py scheduler --portfolio 5000
 ```
 
 ## 📁 Project Structure
@@ -74,7 +77,7 @@ polybonds/
 │   ├── market_scanner.py   # Opportunity finder
 │   ├── trade_executor.py   # Order execution
 │   └── api.py              # FastAPI server
-├── frontend/               # React dashboard (coming soon)
+├── frontend/               # React + Vite + Tailwind dashboard
 ├── .env.example            # Example configuration
 ├── requirements.txt        # Python dependencies
 ├── run.py                  # CLI entry point
