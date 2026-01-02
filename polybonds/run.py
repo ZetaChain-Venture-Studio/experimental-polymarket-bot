@@ -8,6 +8,7 @@ Usage:
     python run.py positions      # View open positions
     python run.py history        # View trade history
     python run.py server         # Start API server
+    python run.py scheduler      # Start automated scheduler
     python run.py --help         # Show help
 """
 
@@ -260,6 +261,51 @@ def cmd_server(args):
     )
 
 
+def cmd_scheduler(args):
+    """Start the automated scheduler."""
+    print("\n⏰ Starting Polybonds Scheduler...\n")
+
+    settings, db = setup_environment()
+
+    from backend.scheduler import create_scheduler
+
+    portfolio_value = args.portfolio if hasattr(args, 'portfolio') else 10000
+
+    print(f"   Portfolio value: ${portfolio_value:,.0f}")
+    print(f"   Auto-trading: {'ENABLED' if settings.auto_trading_enabled else 'DISABLED (simulation mode)'}")
+    print()
+    print("   Scheduled jobs:")
+    print("   - Market scan: every 5 minutes")
+    print("   - Stop-loss check: every 1 minute")
+    print("   - Settlement monitor: every hour")
+    print("   - Portfolio snapshot: every 10 minutes")
+    print()
+
+    if not settings.auto_trading_enabled:
+        print("⚠️  AUTO_TRADING_ENABLED=false - Trades will be simulated")
+        print("   Set AUTO_TRADING_ENABLED=true in .env for real trades\n")
+
+    scheduler = create_scheduler(
+        settings=settings,
+        db=db,
+        portfolio_value=portfolio_value
+    )
+
+    try:
+        scheduler.start()
+        print("✅ Scheduler running. Press Ctrl+C to stop.\n")
+
+        # Keep the main thread alive
+        import time
+        while True:
+            time.sleep(1)
+
+    except KeyboardInterrupt:
+        print("\n\n⏹️  Stopping scheduler...")
+        scheduler.stop()
+        print("👋 Scheduler stopped.")
+
+
 def cmd_check(args):
     """Check configuration and connection."""
     print("\n🔧 Checking Polybonds configuration...\n")
@@ -308,6 +354,7 @@ Examples:
   python run.py trade             Execute trades on top opportunities
   python run.py positions         View current positions
   python run.py server            Start web dashboard API
+  python run.py scheduler         Start automated scheduler (runs in background)
   python run.py check             Check configuration
         """
     )
@@ -341,7 +388,11 @@ Examples:
     
     # Check command
     check_parser = subparsers.add_parser("check", help="Check configuration")
-    
+
+    # Scheduler command
+    scheduler_parser = subparsers.add_parser("scheduler", help="Start automated scheduler")
+    scheduler_parser.add_argument("--portfolio", type=float, default=10000, help="Portfolio value for position sizing")
+
     args = parser.parse_args()
     
     if args.command is None:
@@ -357,6 +408,7 @@ Examples:
         "settlements": cmd_settlements,
         "server": cmd_server,
         "check": cmd_check,
+        "scheduler": cmd_scheduler,
     }
     
     try:
