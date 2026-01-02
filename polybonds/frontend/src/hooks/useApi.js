@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 
-const API_BASE = '/api';
+// Use environment variable for API URL, fallback to /api for local dev
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 export function useApi(endpoint, options = {}) {
   const [data, setData] = useState(null);

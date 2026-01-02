@@ -1,0 +1,8 @@
+{
+  "buildCommand": "cd polybonds/frontend && npm install && npm run build",
+  "outputDirectory": "polybonds/frontend/dist",
+  "framework": "vite",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
