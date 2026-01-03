@@ -486,6 +486,70 @@ async def get_logs(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/debug/recreate-creds", tags=["System"])
+async def debug_recreate_creds() -> Dict[str, Any]:
+    """Force recreate API credentials to fix auth issues."""
+    import traceback
+
+    result = {
+        "success": False,
+        "old_api_key": None,
+        "new_api_key": None,
+        "create_result": None,
+        "derive_result": None,
+        "errors": []
+    }
+
+    try:
+        if not client._clob_client:
+            result["errors"].append("CLOB client not initialized")
+            return result
+
+        # Get old creds
+        old_creds = getattr(client._clob_client, 'creds', None)
+        if old_creds:
+            result["old_api_key"] = old_creds.api_key[:20] + "..."
+
+        # Try to create new API key
+        try:
+            logger.info("Force creating new API key...")
+            new_creds = client._clob_client.create_api_key()
+            result["create_result"] = "success"
+            result["new_api_key"] = new_creds.api_key[:20] + "..."
+            client._clob_client.set_api_creds(new_creds)
+            result["success"] = True
+        except Exception as create_err:
+            result["create_result"] = f"failed: {str(create_err)}"
+
+            # Try derive instead
+            try:
+                logger.info("Create failed, trying derive...")
+                new_creds = client._clob_client.derive_api_key()
+                result["derive_result"] = "success"
+                result["new_api_key"] = new_creds.api_key[:20] + "..."
+                client._clob_client.set_api_creds(new_creds)
+                result["success"] = True
+            except Exception as derive_err:
+                result["derive_result"] = f"failed: {str(derive_err)}"
+                result["errors"].append(f"Both create and derive failed")
+
+        # Test balance with new creds
+        if result["success"]:
+            balance = client.get_balance()
+            result["balance_after_recreate"] = balance
+            if balance is not None:
+                result["message"] = f"Success! Balance: ${balance:.2f} USDC"
+            else:
+                result["balance_error"] = getattr(client, '_last_balance_error', 'Unknown')
+
+        return result
+
+    except Exception as e:
+        result["errors"].append(f"Error: {e}")
+        result["traceback"] = traceback.format_exc()
+        return result
+
+
 @app.post("/api/debug/test-trade", tags=["System"])
 async def debug_test_trade(amount_usd: float = 1.0) -> Dict[str, Any]:
     """

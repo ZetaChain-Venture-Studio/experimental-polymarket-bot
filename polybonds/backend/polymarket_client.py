@@ -123,19 +123,33 @@ class PolymarketClient:
                 logger.warning("No signer found on CLOB client after initialization")
 
             # Create/derive API credentials
-            logger.info("Deriving API credentials...")
+            # First try to create new credentials (registers with API)
+            # If that fails, derive existing ones
+            logger.info("Creating/deriving API credentials...")
+            api_creds = None
             try:
-                api_creds = self._clob_client.create_or_derive_api_creds()
-                if api_creds is None:
-                    logger.error("create_or_derive_api_creds returned None")
+                # Try to create new credentials first
+                logger.info("Attempting to create new API key...")
+                api_creds = self._clob_client.create_api_key()
+                logger.info(f"Successfully created new API key: {api_creds.api_key[:20]}...")
+            except Exception as create_error:
+                logger.info(f"Create API key failed (may already exist): {create_error}")
+                # Try to derive existing credentials
+                try:
+                    logger.info("Attempting to derive existing API key...")
+                    api_creds = self._clob_client.derive_api_key()
+                    logger.info(f"Successfully derived API key: {api_creds.api_key[:20]}...")
+                except Exception as derive_error:
+                    logger.error(f"Failed to derive API credentials: {derive_error}")
+                    import traceback
+                    logger.error(f"Derive error traceback: {traceback.format_exc()}")
                     return False
-                logger.info(f"API creds derived: api_key exists={bool(api_creds.api_key if api_creds else False)}")
-                logger.info(f"API creds type: {type(api_creds)}")
-            except Exception as creds_error:
-                logger.error(f"Failed to derive API credentials: {creds_error}")
-                import traceback
-                logger.error(f"Creds error traceback: {traceback.format_exc()}")
+
+            if api_creds is None:
+                logger.error("No API credentials available after create/derive")
                 return False
+
+            logger.info(f"API creds ready: api_key={api_creds.api_key[:20]}..., has_secret={bool(api_creds.api_secret)}")
 
             try:
                 self._clob_client.set_api_creds(api_creds)
