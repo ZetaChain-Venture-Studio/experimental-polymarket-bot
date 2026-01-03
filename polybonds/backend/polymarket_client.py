@@ -550,9 +550,20 @@ class PolymarketClient:
             return None
 
         try:
+            # Debug: check signer status
+            if hasattr(self._clob_client, 'signer'):
+                signer = self._clob_client.signer
+                if signer is None:
+                    logger.warning("CLOB signer is None - cannot get balance")
+                    return None
+                if not hasattr(signer, 'signature_type'):
+                    logger.warning(f"Signer missing signature_type attr. Signer type: {type(signer)}")
+                    return None
+                logger.debug(f"Signer OK: type={type(signer)}, sig_type={getattr(signer, 'signature_type', 'N/A')}")
+
             # Debug: check if creds are set
             if hasattr(self._clob_client, 'creds') and self._clob_client.creds:
-                logger.info(f"CLOB creds available, api_key exists: {bool(self._clob_client.creds.api_key)}")
+                logger.debug(f"CLOB creds available, api_key exists: {bool(self._clob_client.creds.api_key)}")
             else:
                 logger.warning("CLOB creds not set on client")
                 return None
@@ -563,6 +574,15 @@ class PolymarketClient:
             if balance_info and 'balance' in balance_info:
                 # Balance is in wei (6 decimals for USDC)
                 return float(balance_info['balance']) / 1e6
+        except AttributeError as e:
+            if 'signature_type' in str(e):
+                logger.error(f"Signer not properly initialized - signature_type missing: {e}")
+                # Check signer state for debugging
+                if hasattr(self._clob_client, 'signer'):
+                    s = self._clob_client.signer
+                    logger.error(f"Signer debug: is_none={s is None}, type={type(s)}, attrs={dir(s) if s else 'N/A'}")
+            else:
+                logger.warning(f"Could not get balance (AttributeError): {e}")
         except Exception as e:
             logger.warning(f"Could not get balance from CLOB: {e}")
             import traceback

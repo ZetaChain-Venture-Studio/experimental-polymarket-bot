@@ -44,14 +44,14 @@ class PolybondOpportunity:
     end_date: Optional[datetime]
     days_to_resolution: float
 
-    # Resolution info
+    # Risk assessment (must come before fields with defaults)
+    risk_score: float  # 0-100, lower is safer
+
+    # Resolution info (fields with defaults)
     resolution_source: str = ""
     resolution_rules: str = ""
     estimated_resolution_hours: float = 24.0  # Hours after end_date
     estimated_payout_date: Optional[datetime] = None  # When you'll get paid
-
-    # Risk assessment
-    risk_score: float  # 0-100, lower is safer
     risk_factors: List[str] = field(default_factory=list)
 
     # Metadata
