@@ -159,7 +159,12 @@ class MarketScanner:
         bond_side = None
         bond_price = 0
         token_id = ""
-        
+
+        # Debug: log high probability markets
+        max_price = max(price_yes or 0, price_no or 0)
+        if max_price >= 0.80:
+            logger.info(f"High prob market: {market.question[:50]}... YES={price_yes} NO={price_no}")
+
         if price_yes and price_yes >= self.settings.min_probability:
             bond_side = "YES"
             bond_price = price_yes

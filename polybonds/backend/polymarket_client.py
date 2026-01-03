@@ -121,19 +121,38 @@ class PolymarketClient:
     
     def get_all_markets(self) -> List[Dict[str, Any]]:
         """
-        Fetch all markets from Gamma API.
-        
+        Fetch all markets from Gamma API with pagination.
+
         Returns:
             List of market dictionaries
         """
+        all_markets = []
         try:
             url = f"{self.settings.gamma_api_url}/markets"
-            response = self._http_client.get(url, params={"active": "true"})
-            response.raise_for_status()
-            return response.json()
+            # Fetch with higher limit and pagination
+            offset = 0
+            limit = 100
+            while True:
+                response = self._http_client.get(url, params={
+                    "active": "true",
+                    "limit": limit,
+                    "offset": offset
+                })
+                response.raise_for_status()
+                markets = response.json()
+                if not markets:
+                    break
+                all_markets.extend(markets)
+                if len(markets) < limit:
+                    break  # No more pages
+                offset += limit
+                # Safety limit to avoid infinite loops
+                if offset > 1000:
+                    break
+            return all_markets
         except Exception as e:
             logger.error(f"Failed to fetch markets: {e}")
-            return []
+            return all_markets
     
     def get_market(self, market_id: str) -> Optional[Dict[str, Any]]:
         """
