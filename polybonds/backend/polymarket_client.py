@@ -241,18 +241,31 @@ class PolymarketClient:
     def get_market(self, market_id: str) -> Optional[Dict[str, Any]]:
         """
         Fetch a single market by ID.
-        
+
         Args:
             market_id: The market's condition ID
-            
+
         Returns:
             Market dictionary or None
         """
         try:
+            # Try direct fetch first
             url = f"{self.settings.gamma_api_url}/markets/{market_id}"
             response = self._http_client.get(url)
-            response.raise_for_status()
-            return response.json()
+            if response.status_code == 200:
+                return response.json()
+
+            # If direct fetch fails, try with conditionId parameter
+            logger.info(f"Direct fetch failed for {market_id}, trying conditionId param")
+            url = f"{self.settings.gamma_api_url}/markets"
+            response = self._http_client.get(url, params={"conditionId": market_id})
+            if response.status_code == 200:
+                markets = response.json()
+                if markets and len(markets) > 0:
+                    return markets[0]
+
+            logger.warning(f"Market not found: {market_id}")
+            return None
         except Exception as e:
             logger.error(f"Failed to fetch market {market_id}: {e}")
             return None

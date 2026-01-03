@@ -392,11 +392,16 @@ async def execute_trade(
         # Get amount from body
         trade_amount = request.amount_usd if request else None
         logger.info(f"Trade request: market_id={market_id}, amount={trade_amount}")
+        logger.info(f"AUTO_TRADING_ENABLED={settings.auto_trading_enabled}")
 
         # Get opportunity
         opportunity = scanner.get_opportunity(market_id)
         if not opportunity:
-            logger.warning(f"Market not found: {market_id}")
+            logger.warning(f"Market not found or not eligible: {market_id}")
+            # Try to fetch the market directly to see why it failed
+            market_data = client.get_market(market_id)
+            if market_data:
+                logger.warning(f"Market exists but not eligible. Data: price_yes={market_data.get('outcomePrices')}, volume={market_data.get('volume24hr')}")
             raise HTTPException(status_code=404, detail="Market not found or not eligible")
 
         # Execute trade
