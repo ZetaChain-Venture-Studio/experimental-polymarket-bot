@@ -191,8 +191,9 @@ class MarketScanner:
             
         time_to_resolution = market.end_date - now
         days_to_resolution = time_to_resolution.total_seconds() / 86400
-        
-        if days_to_resolution < self.settings.min_days_to_resolution:
+
+        # Allow markets that ended up to 3 days ago (pending settlement)
+        if days_to_resolution < -3:
             return None
         if days_to_resolution > self.settings.max_days_to_resolution:
             return None

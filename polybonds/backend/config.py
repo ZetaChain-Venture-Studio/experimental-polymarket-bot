@@ -42,10 +42,10 @@ class Settings(BaseSettings):
         description="Minimum probability to consider (0.98 = 98%)"
     )
     max_probability: float = Field(
-        default=0.995,
+        default=0.9999,
         ge=0.50,
-        le=0.9999,
-        description="Maximum probability (avoid near-settled markets)"
+        le=1.0,
+        description="Maximum probability (avoid already-settled markets)"
     )
     min_volume_24h: float = Field(
         default=5000,
@@ -70,9 +70,9 @@ class Settings(BaseSettings):
         description="Exit if price drops below this"
     )
     min_days_to_resolution: int = Field(
-        default=1,
+        default=0,
         ge=0,
-        description="Minimum days until market resolution"
+        description="Minimum days until market resolution (0 = today)"
     )
     max_days_to_resolution: int = Field(
         default=30,
