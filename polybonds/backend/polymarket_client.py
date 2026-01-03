@@ -635,45 +635,39 @@ class PolymarketClient:
         try:
             # Get wallet address from signer
             wallet_address = signer.address()
-            logger.info(f"Using wallet address: {wallet_address[:20]}...")
+            logger.info(f"Using wallet address: {wallet_address}")
 
-            # Make direct HTTP call to balance endpoint
-            # This bypasses the buggy get_balance_allowance() method
-            import time
-            import hmac as hmac_module
-            import hashlib
-            import base64
+            # Use the library's signing function for correct HMAC
+            from py_clob_client.signing.hmac import build_hmac_signature
+            from datetime import datetime
 
-            timestamp = str(int(time.time()))
+            timestamp = int(datetime.now().timestamp())
             method = "GET"
             # Include signature_type in query params (required by Polymarket API)
             sig_type = self.settings.polymarket_signature_type
             request_path = f"/balance-allowance?asset_type=USDC&signature_type={sig_type}"
 
-            # Create HMAC signature for L2 auth (uses urlsafe base64)
-            message = f"{timestamp}{method}{request_path}"
-
-            # Decode secret using urlsafe_b64decode (matches library implementation)
-            secret_bytes = base64.urlsafe_b64decode(creds.api_secret)
-            signature = hmac_module.new(
-                secret_bytes,
-                message.encode('utf-8'),
-                hashlib.sha256
-            ).digest()
-            sig_b64 = base64.urlsafe_b64encode(signature).decode('utf-8')
+            # Use library's HMAC function
+            hmac_sig = build_hmac_signature(
+                creds.api_secret,
+                timestamp,
+                method,
+                request_path,
+                None  # No body for GET request
+            )
 
             # Level 2 headers (requires both POLY_ADDRESS and POLY_API_KEY)
             headers = {
                 "POLY_ADDRESS": wallet_address,
-                "POLY_SIGNATURE": sig_b64,
-                "POLY_TIMESTAMP": timestamp,
+                "POLY_SIGNATURE": hmac_sig,
+                "POLY_TIMESTAMP": str(timestamp),
                 "POLY_API_KEY": creds.api_key,
                 "POLY_PASSPHRASE": creds.api_passphrase,
             }
 
             url = f"{self.settings.clob_api_url}{request_path}"
             logger.info(f"Fetching balance from: {url}")
-            logger.debug(f"Balance headers: POLY_ADDRESS={wallet_address[:20]}..., POLY_API_KEY={creds.api_key[:20]}...")
+            logger.info(f"Headers: POLY_ADDRESS={wallet_address}, POLY_API_KEY={creds.api_key[:20]}..., ts={timestamp}")
 
             response = self._http_client.get(url, headers=headers)
             logger.info(f"Balance response status: {response.status_code}")
