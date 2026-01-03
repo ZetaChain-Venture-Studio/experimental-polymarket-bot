@@ -134,7 +134,7 @@ class PolymarketClient:
             limit = 100
             while True:
                 response = self._http_client.get(url, params={
-                    "closed": "false",  # Use closed=false instead of active=true
+                    "closed": "false",
                     "limit": limit,
                     "offset": offset
                 })
