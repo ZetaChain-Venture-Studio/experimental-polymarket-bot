@@ -144,16 +144,23 @@ class MarketScanner:
         if not market.active:
             return None
         
-        # Get fresh prices from CLOB
-        price_yes = self.client.get_price(market.token_id_yes, "BUY")
-        price_no = self.client.get_price(market.token_id_no, "BUY")
-        
-        if price_yes is None and price_no is None:
+        # Use API prices first (from Gamma API), then try CLOB for fresh data
+        price_yes = market.price_yes
+        price_no = market.price_no
+
+        # Try to get fresh prices from CLOB (optional enhancement)
+        if market.token_id_yes:
+            clob_price = self.client.get_price(market.token_id_yes, "BUY")
+            if clob_price is not None:
+                price_yes = clob_price
+        if market.token_id_no:
+            clob_price = self.client.get_price(market.token_id_no, "BUY")
+            if clob_price is not None:
+                price_no = clob_price
+
+        # Skip if no valid prices
+        if (price_yes is None or price_yes == 0) and (price_no is None or price_no == 0):
             return None
-        
-        # Use API prices as fallback
-        price_yes = price_yes or market.price_yes
-        price_no = price_no or market.price_no
         
         # Determine which side is the "bond" (high probability side)
         bond_side = None
