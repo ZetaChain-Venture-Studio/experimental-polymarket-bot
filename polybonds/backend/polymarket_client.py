@@ -145,6 +145,22 @@ class PolymarketClient:
                 logger.error(f"Set creds error traceback: {traceback.format_exc()}")
                 return False
 
+            # Re-apply signature_type after set_api_creds (it may reset internal state)
+            if hasattr(self._clob_client, 'signer') and self._clob_client.signer is not None:
+                self._clob_client.signer.signature_type = self.settings.polymarket_signature_type
+                logger.info(f"Re-set signature_type after set_api_creds: {self.settings.polymarket_signature_type}")
+
+            # Also check if there's a builder or order_builder that needs signature_type
+            if hasattr(self._clob_client, 'builder') and self._clob_client.builder is not None:
+                if hasattr(self._clob_client.builder, 'signer') and self._clob_client.builder.signer is not None:
+                    self._clob_client.builder.signer.signature_type = self.settings.polymarket_signature_type
+                    logger.info("Also set signature_type on builder.signer")
+
+            if hasattr(self._clob_client, 'order_builder') and self._clob_client.order_builder is not None:
+                if hasattr(self._clob_client.order_builder, 'signer') and self._clob_client.order_builder.signer is not None:
+                    self._clob_client.order_builder.signer.signature_type = self.settings.polymarket_signature_type
+                    logger.info("Also set signature_type on order_builder.signer")
+
             self._authenticated = True
 
             logger.info("CLOB client initialized with full authentication")
