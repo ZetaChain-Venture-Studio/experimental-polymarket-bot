@@ -109,17 +109,36 @@ class PolymarketClient:
 
             # Create/derive API credentials
             logger.info("Deriving API credentials...")
-            api_creds = self._clob_client.create_or_derive_api_creds()
-            logger.info(f"API creds derived: api_key exists={bool(api_creds.api_key if api_creds else False)}")
+            try:
+                api_creds = self._clob_client.create_or_derive_api_creds()
+                if api_creds is None:
+                    logger.error("create_or_derive_api_creds returned None")
+                    return False
+                logger.info(f"API creds derived: api_key exists={bool(api_creds.api_key if api_creds else False)}")
+                logger.info(f"API creds type: {type(api_creds)}")
+            except Exception as creds_error:
+                logger.error(f"Failed to derive API credentials: {creds_error}")
+                import traceback
+                logger.error(f"Creds error traceback: {traceback.format_exc()}")
+                return False
 
-            self._clob_client.set_api_creds(api_creds)
+            try:
+                self._clob_client.set_api_creds(api_creds)
+            except Exception as set_creds_error:
+                logger.error(f"Failed to set API credentials: {set_creds_error}")
+                import traceback
+                logger.error(f"Set creds error traceback: {traceback.format_exc()}")
+                return False
+
             self._authenticated = True
 
             logger.info("CLOB client initialized with full authentication")
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to initialize CLOB client: {e}")
+            import traceback
+            logger.error(f"Init error traceback: {traceback.format_exc()}")
             return False
     
     @property

@@ -451,7 +451,7 @@ async def get_logs(
     """Get recent activity logs."""
     try:
         logs = db.get_recent_logs(limit=limit, level=level)
-        
+
         return {
             "count": len(logs),
             "logs": [
@@ -469,6 +469,90 @@ async def get_logs(
     except Exception as e:
         logger.error(f"Error fetching logs: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/debug/auth", tags=["System"])
+async def debug_auth() -> Dict[str, Any]:
+    """Debug authentication status and test CLOB client."""
+    import traceback
+
+    result = {
+        "clob_available": False,
+        "client_initialized": False,
+        "authenticated": False,
+        "private_key_length": 0,
+        "private_key_starts_with_0x": False,
+        "funder_address": "",
+        "chain_id": 0,
+        "signature_type": 0,
+        "balance": None,
+        "errors": []
+    }
+
+    try:
+        # Check if py-clob-client is available
+        try:
+            from py_clob_client.client import ClobClient
+            result["clob_available"] = True
+        except ImportError as e:
+            result["errors"].append(f"py-clob-client not installed: {e}")
+            return result
+
+        # Check settings
+        pk = settings.polymarket_private_key
+        result["private_key_length"] = len(pk) if pk else 0
+        result["private_key_starts_with_0x"] = pk.startswith("0x") if pk else False
+        result["funder_address"] = settings.polymarket_funder_address[:20] + "..." if settings.polymarket_funder_address else ""
+        result["chain_id"] = settings.polymarket_chain_id
+        result["signature_type"] = settings.polymarket_signature_type
+
+        # Check client state
+        result["client_initialized"] = client._clob_client is not None
+        result["authenticated"] = client.is_authenticated
+
+        # Check CLOB client internal state
+        if client._clob_client is not None:
+            clob = client._clob_client
+            result["clob_internal"] = {
+                "has_signer": hasattr(clob, 'signer') and clob.signer is not None,
+                "has_creds": hasattr(clob, 'creds') and clob.creds is not None,
+                "host": getattr(clob, 'host', None),
+            }
+            # Check signer details
+            if hasattr(clob, 'signer') and clob.signer is not None:
+                result["clob_internal"]["signer_address"] = str(getattr(clob.signer, 'address', 'unknown'))[:20] + "..."
+            # Check if signer has signature_type
+            if hasattr(clob, 'signer'):
+                signer = clob.signer
+                result["clob_internal"]["signer_has_signature_type"] = hasattr(signer, 'signature_type') if signer else False
+                if signer and hasattr(signer, 'signature_type'):
+                    result["clob_internal"]["signer_signature_type"] = signer.signature_type
+
+        # If not authenticated, try to reinitialize
+        if not client.is_authenticated:
+            logger.info("Debug: Attempting to reinitialize client...")
+            try:
+                init_result = client.initialize(read_only=False)
+                result["init_result"] = init_result
+                result["authenticated_after_init"] = client.is_authenticated
+            except Exception as init_error:
+                result["errors"].append(f"Init error: {init_error}")
+                result["init_traceback"] = traceback.format_exc()
+
+        # Try to get balance
+        if client.is_authenticated:
+            try:
+                balance = client.get_balance()
+                result["balance"] = balance
+            except Exception as balance_error:
+                result["errors"].append(f"Balance error: {balance_error}")
+
+        return result
+
+    except Exception as e:
+        result["errors"].append(f"Debug error: {e}")
+        result["traceback"] = traceback.format_exc()
+        return result
 
 
 # ===========================================
