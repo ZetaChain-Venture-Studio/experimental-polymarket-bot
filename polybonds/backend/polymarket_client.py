@@ -40,6 +40,10 @@ class MarketInfo:
     volume_24h: float
     liquidity: float
     active: bool
+    # Resolution info
+    resolution_source: str = ""
+    resolution_rules: str = ""
+    estimated_resolution_hours: Optional[float] = None  # Hours after end_date
 
 
 @dataclass
@@ -570,6 +574,50 @@ class PolymarketClient:
     # UTILITY METHODS
     # ===========================================
     
+    def _estimate_resolution_time(self, resolution_source: str, category: str) -> float:
+        """
+        Estimate how long after end_date the market will resolve (in hours).
+
+        Based on typical resolution times:
+        - UMA Oracle: 2-4 hours (fast, automated)
+        - Official sources (AP, Reuters): 1-6 hours
+        - Sports: Usually within 2-4 hours after game
+        - Crypto/Price: Often immediate or within 1 hour
+        - Politics/Elections: Can take days for official results
+
+        Returns:
+            Estimated hours until resolution after end_date
+        """
+        source_lower = (resolution_source or "").lower()
+        category_lower = (category or "").lower()
+
+        # Fast automated resolution
+        if "uma" in source_lower:
+            return 2.0  # UMA typically resolves in 2 hours
+
+        # Crypto/price feeds are usually fast
+        if "crypto" in category_lower or "price" in source_lower or "coingecko" in source_lower:
+            return 1.0
+
+        # Sports usually resolve quickly after game
+        if "sports" in category_lower or "espn" in source_lower or "nfl" in source_lower:
+            return 4.0
+
+        # News sources (AP, Reuters) are fast
+        if any(s in source_lower for s in ["ap", "reuters", "associated press", "bloomberg"]):
+            return 6.0
+
+        # Politics/elections can take longer
+        if "politic" in category_lower or "election" in category_lower:
+            return 48.0  # Can take 1-2 days for official results
+
+        # Business/earnings reports
+        if "business" in category_lower or "earnings" in source_lower:
+            return 12.0
+
+        # Default estimate
+        return 24.0  # 1 day default
+
     def parse_market_info(self, market_data: Dict[str, Any]) -> Optional[MarketInfo]:
         """
         Parse raw market data into MarketInfo dataclass.
@@ -635,6 +683,24 @@ class PolymarketClient:
             if price_yes == 0 and price_no == 0:
                 return None
 
+            # Parse resolution source and rules
+            resolution_source = market_data.get("resolutionSource", "") or ""
+            description = market_data.get("description", "") or ""
+
+            # Extract resolution rules from description (usually contains resolution criteria)
+            resolution_rules = ""
+            desc_lower = description.lower()
+            if "resolution" in desc_lower or "resolve" in desc_lower:
+                # Try to extract the resolution section
+                resolution_rules = description
+            elif description:
+                resolution_rules = description[:500]  # First 500 chars as context
+
+            # Estimate resolution time based on source
+            estimated_resolution_hours = self._estimate_resolution_time(
+                resolution_source, market_data.get("category", "")
+            )
+
             return MarketInfo(
                 id=market_data.get("conditionId") or market_data.get("id"),
                 question=market_data.get("question", ""),
@@ -647,7 +713,10 @@ class PolymarketClient:
                 price_no=price_no,
                 volume_24h=float(market_data.get("volume24hr", 0) or market_data.get("volume", 0)),
                 liquidity=float(market_data.get("liquidity", 0) or market_data.get("liquidityNum", 0)),
-                active=not market_data.get("closed", False)
+                active=not market_data.get("closed", False),
+                resolution_source=resolution_source,
+                resolution_rules=resolution_rules,
+                estimated_resolution_hours=estimated_resolution_hours
             )
         except Exception as e:
             logger.error(f"Failed to parse market info: {e}")

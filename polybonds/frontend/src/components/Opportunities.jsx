@@ -111,37 +111,54 @@ export default function Opportunities() {
     return { count: selectedOpps.length, totalInvested, expectedReturn, avgApy };
   }, [sortedOpps, selected]);
 
-  // Format settlement date
-  const formatSettlement = (days) => {
-    const now = new Date();
-    const settlementDate = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+  // Format settlement date using actual estimated payout date
+  const formatSettlement = (opp) => {
+    const days = opp.days_to_resolution;
+    const estimatedHours = opp.estimated_resolution_hours || 24;
+    const estimatedPayout = opp.estimated_payout_date ? new Date(opp.estimated_payout_date) : null;
+    const endDate = opp.end_date ? new Date(opp.end_date) : null;
+
+    const formatDate = (date) => {
+      if (!date) return '';
+      const options = { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' };
+      return date.toLocaleDateString('en-US', options);
+    };
 
     if (days < -1) {
-      // Already ended, estimate settlement (usually 2-48h after end)
+      // Already ended, awaiting settlement
       return {
         status: 'pending',
         label: 'Pending Resolution',
-        detail: `Ended ${Math.abs(days).toFixed(0)}d ago - awaiting settlement`
+        detail: estimatedPayout
+          ? `Payout expected: ${formatDate(estimatedPayout)}`
+          : `Ended ${Math.abs(days).toFixed(0)}d ago - awaiting settlement (~${estimatedHours}h resolution)`
       };
     } else if (days < 0) {
       return {
         status: 'pending',
         label: 'Resolving Soon',
-        detail: 'Market ended - settlement imminent'
+        detail: estimatedPayout
+          ? `Payout expected: ${formatDate(estimatedPayout)}`
+          : `Market ended - resolution in ~${estimatedHours}h`
       };
     } else if (days < 1) {
       const hours = days * 24;
       return {
         status: 'soon',
         label: `${hours.toFixed(0)}h remaining`,
-        detail: `Ends today, settles ~${(hours + 2).toFixed(0)}-${(hours + 48).toFixed(0)}h`
+        detail: estimatedPayout
+          ? `Payout: ${formatDate(estimatedPayout)}`
+          : `Ends today, payout ~${(hours + estimatedHours).toFixed(0)}h`
       };
     } else {
-      const options = { month: 'short', day: 'numeric' };
       return {
         status: 'future',
         label: `${days.toFixed(0)} days`,
-        detail: `Ends ${settlementDate.toLocaleDateString('en-US', options)}, settles +2-48h after`
+        detail: estimatedPayout
+          ? `Payout: ${formatDate(estimatedPayout)}`
+          : endDate
+            ? `Ends ${formatDate(endDate)}, +${estimatedHours}h resolution`
+            : `Settles in ~${(days * 24 + estimatedHours).toFixed(0)}h`
       };
     }
   };
@@ -271,7 +288,7 @@ export default function Opportunities() {
             {sortedOpps.map((opp) => {
               const isSelected = selected.has(opp.market_id);
               const isTrading = trading[opp.market_id];
-              const settlement = formatSettlement(opp.days_to_resolution);
+              const settlement = formatSettlement(opp);
 
               return (
                 <div
@@ -342,31 +359,57 @@ export default function Opportunities() {
                         </div>
                       </div>
 
-                      {/* Settlement Info */}
-                      <div className={`mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm ${
-                        settlement.status === 'pending' ? 'bg-orange-900/30 text-orange-400' :
-                        settlement.status === 'soon' ? 'bg-yellow-900/30 text-yellow-400' :
-                        'bg-blue-900/30 text-blue-400'
-                      }`}>
-                        {settlement.status === 'pending' && (
-                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
-                          </svg>
+                      {/* Resolution Source & Settlement Info */}
+                      <div className="mt-3 flex flex-wrap items-center gap-3">
+                        {/* Resolution Source Badge */}
+                        {opp.resolution_source && (
+                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-purple-900/30 text-purple-400 text-xs">
+                            <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                            </svg>
+                            <span className="font-medium">Source:</span>
+                            <span>{opp.resolution_source.slice(0, 30)}{opp.resolution_source.length > 30 ? '...' : ''}</span>
+                          </div>
                         )}
-                        {settlement.status === 'soon' && (
-                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                          </svg>
-                        )}
-                        {settlement.status === 'future' && (
-                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd" />
-                          </svg>
-                        )}
-                        <span className="font-medium">{settlement.label}</span>
-                        <span className="text-gray-400">•</span>
-                        <span className="text-xs opacity-80">{settlement.detail}</span>
+
+                        {/* Settlement Info */}
+                        <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm ${
+                          settlement.status === 'pending' ? 'bg-orange-900/30 text-orange-400' :
+                          settlement.status === 'soon' ? 'bg-yellow-900/30 text-yellow-400' :
+                          'bg-blue-900/30 text-blue-400'
+                        }`}>
+                          {settlement.status === 'pending' && (
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+                            </svg>
+                          )}
+                          {settlement.status === 'soon' && (
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                            </svg>
+                          )}
+                          {settlement.status === 'future' && (
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd" />
+                            </svg>
+                          )}
+                          <span className="font-medium">{settlement.label}</span>
+                          <span className="text-gray-400">•</span>
+                          <span className="text-xs opacity-80">{settlement.detail}</span>
+                        </div>
                       </div>
+
+                      {/* Resolution Rules (expandable) */}
+                      {opp.resolution_rules && (
+                        <details className="mt-2">
+                          <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-400">
+                            View resolution criteria...
+                          </summary>
+                          <p className="mt-1.5 text-xs text-gray-400 leading-relaxed bg-gray-900/50 p-2 rounded">
+                            {opp.resolution_rules.slice(0, 200)}{opp.resolution_rules.length > 200 ? '...' : ''}
+                          </p>
+                        </details>
+                      )}
                     </div>
 
                     {/* Quick Stats Badge */}

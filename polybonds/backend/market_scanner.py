@@ -21,33 +21,39 @@ logger = logging.getLogger(__name__)
 @dataclass
 class PolybondOpportunity:
     """Represents a Polybond trading opportunity."""
-    
+
     # Market identification
     market_id: str
     question: str
     token_id: str
     side: str  # 'YES' or 'NO' - which side is the "bond"
-    
+
     # Pricing
     current_price: float
     implied_probability: float  # Same as price for prediction markets
-    
+
     # Returns
     potential_return_pct: float  # (1.0 - price) / price * 100
     annualized_return_pct: float  # Potential return annualized
-    
+
     # Market data
     volume_24h: float
     liquidity: float
-    
+
     # Timing
     end_date: Optional[datetime]
     days_to_resolution: float
-    
+
+    # Resolution info
+    resolution_source: str = ""
+    resolution_rules: str = ""
+    estimated_resolution_hours: float = 24.0  # Hours after end_date
+    estimated_payout_date: Optional[datetime] = None  # When you'll get paid
+
     # Risk assessment
     risk_score: float  # 0-100, lower is safer
     risk_factors: List[str] = field(default_factory=list)
-    
+
     # Metadata
     category: str = ""
     scanned_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -201,12 +207,26 @@ class MarketScanner:
         # Calculate returns
         potential_return_pct = ((1.0 - bond_price) / bond_price) * 100
         annualized_return_pct = (potential_return_pct / max(days_to_resolution, 0.1)) * 365
-        
-        # Calculate risk score
+
+        # Get resolution info
+        resolution_source = market.resolution_source
+        resolution_rules = market.resolution_rules
+        estimated_resolution_hours = market.estimated_resolution_hours or 24.0
+
+        # Calculate estimated payout date (end_date + resolution time + 2h challenge period)
+        estimated_payout_date = None
+        if market.end_date:
+            from datetime import timedelta
+            # Resolution time + 2 hour challenge period minimum
+            total_hours = estimated_resolution_hours + 2.0
+            estimated_payout_date = market.end_date + timedelta(hours=total_hours)
+
+        # Calculate risk score (now includes resolution factors)
         risk_score, risk_factors = self._calculate_risk_score(
-            market_data, bond_price, days_to_resolution, market.volume_24h
+            market_data, bond_price, days_to_resolution, market.volume_24h,
+            resolution_source, estimated_resolution_hours
         )
-        
+
         return PolybondOpportunity(
             market_id=market.id,
             question=market.question,
@@ -220,6 +240,10 @@ class MarketScanner:
             liquidity=market.liquidity,
             end_date=market.end_date,
             days_to_resolution=round(days_to_resolution, 2),
+            resolution_source=resolution_source,
+            resolution_rules=resolution_rules,
+            estimated_resolution_hours=estimated_resolution_hours,
+            estimated_payout_date=estimated_payout_date,
             risk_score=round(risk_score, 1),
             risk_factors=risk_factors,
             category=market.category
@@ -230,76 +254,113 @@ class MarketScanner:
         market_data: Dict[str, Any],
         price: float,
         days_to_resolution: float,
-        volume: float
+        volume: float,
+        resolution_source: str = "",
+        estimated_resolution_hours: float = 24.0
     ) -> tuple[float, List[str]]:
         """
         Calculate risk score (0-100, lower is safer).
-        
+
         Factors:
-        1. Probability (lower = higher risk) - 0-30 points
-        2. Volume (lower = higher risk) - 0-20 points
-        3. Time to resolution (longer = higher risk) - 0-30 points
-        4. Category risk - 0-20 points
-        
+        1. Probability (lower = higher risk) - 0-25 points
+        2. Volume (lower = higher risk) - 0-15 points
+        3. Time to resolution (longer = higher risk) - 0-20 points
+        4. Category risk - 0-15 points
+        5. Resolution source reliability - 0-15 points
+        6. Resolution time uncertainty - 0-10 points
+
         Returns:
             Tuple of (risk_score, list_of_risk_factors)
         """
         score = 0
         factors = []
-        
-        # 1. Probability factor (0-30 points)
-        # 98% = 30 points, 99% = 15 points, 99.5% = 7.5 points
-        prob_risk = (1 - price) * 1500
+
+        # 1. Probability factor (0-25 points)
+        # 98% = 25 points, 99% = 12.5 points, 99.5% = 6.25 points
+        prob_risk = (1 - price) * 1250
         score += prob_risk
         if price < 0.985:
             factors.append(f"Lower probability ({price:.1%})")
-        
-        # 2. Volume factor (0-20 points)
+
+        # 2. Volume factor (0-15 points)
         if volume < 10000:
-            score += 20
+            score += 15
             factors.append(f"Low volume (${volume:,.0f})")
         elif volume < 25000:
-            score += 15
+            score += 12
             factors.append(f"Medium-low volume (${volume:,.0f})")
         elif volume < 50000:
-            score += 10
+            score += 8
         elif volume < 100000:
-            score += 5
+            score += 4
         # > $100k volume = 0 points
-        
-        # 3. Time factor (0-30 points)
+
+        # 3. Time factor (0-20 points)
         if days_to_resolution > 21:
-            score += 30
+            score += 20
             factors.append(f"Long time to resolution ({days_to_resolution:.0f} days)")
         elif days_to_resolution > 14:
-            score += 25
+            score += 16
             factors.append(f"Extended resolution time ({days_to_resolution:.0f} days)")
         elif days_to_resolution > 7:
-            score += 15
+            score += 10
         elif days_to_resolution > 3:
-            score += 8
+            score += 5
         elif days_to_resolution > 1:
-            score += 3
+            score += 2
         # < 1 day = 0 points (closest to payout)
-        
-        # 4. Category factor (0-20 points)
+
+        # 4. Category factor (0-15 points)
         category = market_data.get("category", "").lower()
-        
+
         # Higher risk categories (more prone to reversals)
         high_risk_categories = ["politics", "elections", "sports", "entertainment"]
         medium_risk_categories = ["business", "science", "technology"]
         low_risk_categories = ["crypto", "finance", "weather", "economy"]
-        
+
         if any(cat in category for cat in high_risk_categories):
-            score += 20
+            score += 15
             factors.append(f"Higher-risk category ({category})")
         elif any(cat in category for cat in medium_risk_categories):
-            score += 12
+            score += 9
         elif any(cat in category for cat in low_risk_categories):
-            score += 5
+            score += 3
         else:
-            score += 10  # Unknown category
-        
+            score += 7  # Unknown category
+
+        # 5. Resolution source reliability (0-15 points)
+        source_lower = resolution_source.lower() if resolution_source else ""
+
+        # Most reliable sources (automated, official)
+        if "uma" in source_lower:
+            score += 0  # UMA is automated and reliable
+        elif any(s in source_lower for s in ["ap", "reuters", "associated press", "bloomberg"]):
+            score += 3  # Major news agencies are reliable
+        elif any(s in source_lower for s in ["coingecko", "coinmarketcap", "chainlink"]):
+            score += 2  # Crypto data feeds are reliable
+        elif any(s in source_lower for s in ["espn", "nfl", "nba", "official"]):
+            score += 5  # Sports official sources
+        elif resolution_source:
+            score += 8  # Unknown source
+            factors.append(f"Unknown resolution source ({resolution_source[:30]})")
+        else:
+            score += 15  # No resolution source specified
+            factors.append("No resolution source specified")
+
+        # 6. Resolution time uncertainty (0-10 points)
+        if estimated_resolution_hours <= 2:
+            score += 0  # Fast resolution
+        elif estimated_resolution_hours <= 6:
+            score += 2
+        elif estimated_resolution_hours <= 24:
+            score += 5
+        elif estimated_resolution_hours <= 48:
+            score += 8
+            factors.append(f"Slow resolution (~{estimated_resolution_hours:.0f}h)")
+        else:
+            score += 10
+            factors.append(f"Very slow resolution (~{estimated_resolution_hours:.0f}h)")
+
         return min(score, 100), factors
     
     def _save_market_to_db(self, market_data: Dict[str, Any], eligible: bool):
