@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 
 // Use environment variable for API URL, fallback to /api for local dev
+// VITE_API_URL must be set in Vercel for production
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
+console.log('API_BASE:', API_BASE); // Debug: check if env var is loaded
 
 export function useApi(endpoint, options = {}) {
   const [data, setData] = useState(null);
