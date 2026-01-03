@@ -385,20 +385,25 @@ async def trigger_scan() -> Dict[str, Any]:
 @app.post("/api/trade/{market_id}", response_model=ExecuteTradeResponse, tags=["Trading"])
 async def execute_trade(
     market_id: str,
-    amount_usd: Optional[float] = Query(default=None, description="Override amount in USD")
+    request: ExecuteTradeRequest = None
 ):
     """Execute a trade on a specific market."""
     try:
+        # Get amount from body
+        trade_amount = request.amount_usd if request else None
+        logger.info(f"Trade request: market_id={market_id}, amount={trade_amount}")
+
         # Get opportunity
         opportunity = scanner.get_opportunity(market_id)
         if not opportunity:
+            logger.warning(f"Market not found: {market_id}")
             raise HTTPException(status_code=404, detail="Market not found or not eligible")
-        
+
         # Execute trade
         result = executor.execute_polybond_buy(
             opportunity,
             portfolio_value=10000,  # Use settings or fetch actual balance
-            amount_usd=amount_usd
+            amount_usd=trade_amount
         )
         
         return ExecuteTradeResponse(
