@@ -81,6 +81,7 @@ class MarketScanner:
         self.client = client or get_client()
         self.settings = settings or get_settings()
         self.db = db or get_db()
+        self._cached_opportunities: Dict[str, PolybondOpportunity] = {}
         
     def scan_all_markets(self) -> List[PolybondOpportunity]:
         """
@@ -118,7 +119,10 @@ class MarketScanner:
         
         # Sort by annualized return (best opportunities first)
         opportunities.sort(key=lambda x: x.annualized_return_pct, reverse=True)
-        
+
+        # Cache opportunities for quick lookup
+        self._cached_opportunities = {o.market_id: o for o in opportunities}
+
         logger.info(f"Found {len(opportunities)} Polybond opportunities")
         
         # Log activity
@@ -390,17 +394,30 @@ class MarketScanner:
     def get_opportunity(self, market_id: str) -> Optional[PolybondOpportunity]:
         """
         Get a specific opportunity by market ID.
-        
+
         Args:
             market_id: The market's condition ID
-            
+
         Returns:
             PolybondOpportunity if eligible, None otherwise
         """
+        # Check cache first (from most recent scan)
+        if market_id in self._cached_opportunities:
+            logger.debug(f"Found opportunity in cache: {market_id}")
+            return self._cached_opportunities[market_id]
+
+        # If not in cache, fetch and evaluate fresh
+        logger.info(f"Market {market_id} not in cache, fetching fresh")
         market_data = self.client.get_market(market_id)
         if not market_data:
+            logger.warning(f"Could not fetch market: {market_id}")
             return None
-        return self._evaluate_market(market_data)
+
+        opportunity = self._evaluate_market(market_data)
+        if opportunity:
+            # Add to cache
+            self._cached_opportunities[market_id] = opportunity
+        return opportunity
     
     def get_summary(self, opportunities: List[PolybondOpportunity]) -> Dict[str, Any]:
         """
