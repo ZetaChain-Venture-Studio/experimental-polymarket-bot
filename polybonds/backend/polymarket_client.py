@@ -646,7 +646,9 @@ class PolymarketClient:
 
             timestamp = str(int(time.time()))
             method = "GET"
-            request_path = "/balance-allowance?asset_type=USDC"
+            # Include signature_type in query params (required by Polymarket API)
+            sig_type = self.settings.polymarket_signature_type
+            request_path = f"/balance-allowance?asset_type=USDC&signature_type={sig_type}"
 
             # Create HMAC signature for L2 auth (uses urlsafe base64)
             message = f"{timestamp}{method}{request_path}"
@@ -690,8 +692,12 @@ class PolymarketClient:
                             bal = float(data[key]) / 1e6
                             logger.info(f"Parsed balance from '{key}': {bal} USDC")
                             return bal
+                    # If we got here, log the full response for debugging
+                    logger.warning(f"Balance response 200 but unexpected format: {data}")
             else:
-                logger.warning(f"Balance request failed: {response.status_code} - {response.text}")
+                logger.error(f"Balance request failed: {response.status_code} - {response.text[:500]}")
+                # Store last error for debugging
+                self._last_balance_error = f"HTTP {response.status_code}: {response.text[:200]}"
 
         except Exception as e:
             logger.error(f"Failed to get balance: {e}")

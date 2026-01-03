@@ -671,6 +671,9 @@ async def debug_auth() -> Dict[str, Any]:
                 balance = client.get_balance()
                 result["balance"] = balance
                 result["balance_status"] = "success" if balance is not None else "failed"
+                # Include last error if balance failed
+                if balance is None and hasattr(client, '_last_balance_error'):
+                    result["balance_error_detail"] = client._last_balance_error
             except Exception as balance_error:
                 result["errors"].append(f"Balance error: {balance_error}")
                 result["balance_traceback"] = traceback.format_exc()
