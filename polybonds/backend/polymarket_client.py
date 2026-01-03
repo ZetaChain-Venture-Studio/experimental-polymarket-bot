@@ -580,11 +580,19 @@ class PolymarketClient:
                 return None
 
             # Try to get balance from CLOB client
+            logger.info("Attempting to call get_balance_allowance()...")
             balance_info = self._clob_client.get_balance_allowance()
-            logger.info(f"Balance info response: {balance_info}")
-            if balance_info and 'balance' in balance_info:
+            logger.info(f"Balance info response: {balance_info}, type: {type(balance_info)}")
+            if balance_info is None:
+                logger.warning("get_balance_allowance() returned None")
+                return None
+            if isinstance(balance_info, dict) and 'balance' in balance_info:
                 # Balance is in wei (6 decimals for USDC)
-                return float(balance_info['balance']) / 1e6
+                bal = float(balance_info['balance']) / 1e6
+                logger.info(f"Parsed balance: {bal} USDC")
+                return bal
+            else:
+                logger.warning(f"Unexpected balance response format: {balance_info}")
         except AttributeError as e:
             if 'signature_type' in str(e):
                 logger.error(f"Signer not properly initialized - signature_type missing: {e}")
