@@ -95,6 +95,10 @@ class PolymarketClient:
             if not private_key.startswith('0x'):
                 private_key = '0x' + private_key
 
+            logger.info(f"Initializing CLOB with chain_id={self.settings.polymarket_chain_id}, sig_type={self.settings.polymarket_signature_type}")
+            logger.info(f"Private key length: {len(private_key)}, starts with 0x: {private_key.startswith('0x')}")
+            logger.info(f"Funder address: {self.settings.polymarket_funder_address[:10]}...")
+
             self._clob_client = ClobClient(
                 host=self.settings.clob_api_url,
                 key=private_key,
@@ -102,12 +106,15 @@ class PolymarketClient:
                 signature_type=self.settings.polymarket_signature_type,
                 funder=self.settings.polymarket_funder_address
             )
-            
+
             # Create/derive API credentials
+            logger.info("Deriving API credentials...")
             api_creds = self._clob_client.create_or_derive_api_creds()
+            logger.info(f"API creds derived: api_key exists={bool(api_creds.api_key if api_creds else False)}")
+
             self._clob_client.set_api_creds(api_creds)
             self._authenticated = True
-            
+
             logger.info("CLOB client initialized with full authentication")
             return True
             
@@ -512,16 +519,31 @@ class PolymarketClient:
             Balance in USDC or None if unavailable
         """
         if not self._clob_client:
+            logger.warning("CLOB client not initialized")
+            return None
+
+        if not self._authenticated:
+            logger.warning("CLOB client not authenticated - cannot get balance")
             return None
 
         try:
+            # Debug: check if creds are set
+            if hasattr(self._clob_client, 'creds') and self._clob_client.creds:
+                logger.info(f"CLOB creds available, api_key exists: {bool(self._clob_client.creds.api_key)}")
+            else:
+                logger.warning("CLOB creds not set on client")
+                return None
+
             # Try to get balance from CLOB client
             balance_info = self._clob_client.get_balance_allowance()
+            logger.info(f"Balance info response: {balance_info}")
             if balance_info and 'balance' in balance_info:
                 # Balance is in wei (6 decimals for USDC)
                 return float(balance_info['balance']) / 1e6
         except Exception as e:
             logger.warning(f"Could not get balance from CLOB: {e}")
+            import traceback
+            logger.debug(f"Balance error traceback: {traceback.format_exc()}")
 
         return None
     
