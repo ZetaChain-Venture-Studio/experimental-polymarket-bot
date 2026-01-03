@@ -254,13 +254,20 @@ async def get_portfolio():
         total_settled = len(settlements)
         win_rate = (wins / total_settled) if total_settled > 0 else None
         
-        # For now, assume cash balance (would need to track deposits)
-        # This is a placeholder - in production, track actual deposits
-        initial_capital = 10000  # Placeholder
-        cash_balance = initial_capital - total_cost + realized_pnl
-        total_value = cash_balance + positions_value
-        
-        roi_pct = ((total_value - initial_capital) / initial_capital * 100) if initial_capital > 0 else None
+        # Try to get actual balance from Polymarket
+        actual_balance = client.get_balance()
+        if actual_balance is not None:
+            cash_balance = actual_balance
+            total_value = cash_balance + positions_value
+            # Calculate ROI based on total value vs positions cost
+            initial_capital = total_cost + cash_balance if total_cost > 0 else cash_balance
+        else:
+            # Fallback: estimate based on positions
+            initial_capital = 100  # Minimum fallback
+            cash_balance = max(0, initial_capital - total_cost + realized_pnl)
+            total_value = cash_balance + positions_value
+
+        roi_pct = ((realized_pnl + unrealized_pnl) / initial_capital * 100) if initial_capital > 0 else 0
         
         return PortfolioResponse(
             total_value_usd=round(total_value, 2),
@@ -472,10 +479,16 @@ async def get_logs(
 async def startup_event():
     """Initialize on startup."""
     logger.info("Polybonds API server starting...")
-    
-    # Initialize client in read-only mode
-    client.initialize(read_only=True)
-    
+
+    # Initialize client - use full auth if private key is available
+    has_private_key = bool(settings.polymarket_private_key)
+    if has_private_key:
+        logger.info("Private key found, initializing with full authentication...")
+        client.initialize(read_only=False)
+    else:
+        logger.info("No private key, initializing in read-only mode...")
+        client.initialize(read_only=True)
+
     logger.info("Polybonds API server ready")
 
 

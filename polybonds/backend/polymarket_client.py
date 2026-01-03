@@ -462,22 +462,43 @@ class PolymarketClient:
     def get_trades(self, limit: int = 100) -> List[Dict[str, Any]]:
         """
         Get trade history for the authenticated user.
-        
+
         Args:
             limit: Maximum number of trades to return
-            
+
         Returns:
             List of trade dictionaries
         """
         if not self._authenticated:
             return []
-            
+
         try:
             trades = self._clob_client.get_trades()
             return trades[:limit] if trades else []
         except Exception as e:
             logger.error(f"Failed to get trades: {e}")
             return []
+
+    def get_balance(self) -> Optional[float]:
+        """
+        Get USDC balance from the Polymarket account.
+
+        Returns:
+            Balance in USDC or None if unavailable
+        """
+        if not self._clob_client:
+            return None
+
+        try:
+            # Try to get balance from CLOB client
+            balance_info = self._clob_client.get_balance_allowance()
+            if balance_info and 'balance' in balance_info:
+                # Balance is in wei (6 decimals for USDC)
+                return float(balance_info['balance']) / 1e6
+        except Exception as e:
+            logger.warning(f"Could not get balance from CLOB: {e}")
+
+        return None
     
     # ===========================================
     # UTILITY METHODS

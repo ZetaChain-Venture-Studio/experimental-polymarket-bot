@@ -36,10 +36,10 @@ class Settings(BaseSettings):
     # STRATEGY PARAMETERS
     # ===========================================
     min_probability: float = Field(
-        default=0.98,
-        ge=0.90,
+        default=0.90,
+        ge=0.50,
         le=0.999,
-        description="Minimum probability to consider (0.98 = 98%)"
+        description="Minimum probability to consider (0.90 = 90%)"
     )
     max_probability: float = Field(
         default=0.995,
@@ -48,7 +48,7 @@ class Settings(BaseSettings):
         description="Maximum probability (avoid near-settled markets)"
     )
     min_volume_24h: float = Field(
-        default=5000,
+        default=1000,
         ge=0,
         description="Minimum 24h trading volume in USD"
     )
