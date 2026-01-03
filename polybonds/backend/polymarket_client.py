@@ -111,6 +111,17 @@ class PolymarketClient:
                 funder=self.settings.polymarket_funder_address
             )
 
+            # Workaround: Ensure signer has signature_type attribute
+            # Some versions of py-clob-client don't set this properly
+            if hasattr(self._clob_client, 'signer') and self._clob_client.signer is not None:
+                if not hasattr(self._clob_client.signer, 'signature_type'):
+                    logger.info(f"Setting signature_type on signer manually: {self.settings.polymarket_signature_type}")
+                    self._clob_client.signer.signature_type = self.settings.polymarket_signature_type
+                else:
+                    logger.info(f"Signer already has signature_type: {self._clob_client.signer.signature_type}")
+            else:
+                logger.warning("No signer found on CLOB client after initialization")
+
             # Create/derive API credentials
             logger.info("Deriving API credentials...")
             try:
