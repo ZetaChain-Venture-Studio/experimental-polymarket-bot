@@ -134,7 +134,7 @@ class PolymarketClient:
             limit = 100
             while True:
                 response = self._http_client.get(url, params={
-                    "active": "true",
+                    "closed": "false",  # Use closed=false instead of active=true
                     "limit": limit,
                     "offset": offset
                 })
@@ -143,6 +143,7 @@ class PolymarketClient:
                 if not markets:
                     break
                 all_markets.extend(markets)
+                logger.info(f"Fetched {len(markets)} markets (offset={offset})")
                 if len(markets) < limit:
                     break  # No more pages
                 offset += limit
@@ -526,22 +527,55 @@ class PolymarketClient:
     def parse_market_info(self, market_data: Dict[str, Any]) -> Optional[MarketInfo]:
         """
         Parse raw market data into MarketInfo dataclass.
-        
+
         Args:
             market_data: Raw market dictionary from API
-            
+
         Returns:
             MarketInfo object or None
         """
+        import json as json_module
         try:
+            # Parse prices - Gamma API returns outcomePrices as JSON string
+            price_yes = 0.0
+            price_no = 0.0
+            outcome_prices = market_data.get("outcomePrices", "[]")
+            if isinstance(outcome_prices, str):
+                try:
+                    prices = json_module.loads(outcome_prices)
+                    if len(prices) >= 2:
+                        price_yes = float(prices[0])
+                        price_no = float(prices[1])
+                except:
+                    pass
+
+            # Parse token IDs - Gamma API returns clobTokenIds as JSON string
+            token_id_yes = ""
+            token_id_no = ""
+            clob_token_ids = market_data.get("clobTokenIds", "[]")
+            if isinstance(clob_token_ids, str):
+                try:
+                    token_ids = json_module.loads(clob_token_ids)
+                    if len(token_ids) >= 2:
+                        token_id_yes = token_ids[0]
+                        token_id_no = token_ids[1]
+                except:
+                    pass
+
+            # Fallback to tokens array if available
             tokens = market_data.get("tokens", [])
-            if len(tokens) < 2:
-                return None
-            
-            # Find YES and NO tokens
-            yes_token = next((t for t in tokens if t.get("outcome") == "Yes"), tokens[0])
-            no_token = next((t for t in tokens if t.get("outcome") == "No"), tokens[1])
-            
+            if tokens and len(tokens) >= 2:
+                yes_token = next((t for t in tokens if t.get("outcome") == "Yes"), tokens[0])
+                no_token = next((t for t in tokens if t.get("outcome") == "No"), tokens[1])
+                if not token_id_yes:
+                    token_id_yes = yes_token.get("token_id", "")
+                if not token_id_no:
+                    token_id_no = no_token.get("token_id", "")
+                if price_yes == 0:
+                    price_yes = float(yes_token.get("price", 0))
+                if price_no == 0:
+                    price_no = float(no_token.get("price", 0))
+
             # Parse end date
             end_date = None
             end_date_str = market_data.get("endDate") or market_data.get("end_date_iso")
@@ -550,20 +584,24 @@ class PolymarketClient:
                     end_date = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
                 except:
                     pass
-            
+
+            # Skip if no valid prices
+            if price_yes == 0 and price_no == 0:
+                return None
+
             return MarketInfo(
                 id=market_data.get("conditionId") or market_data.get("id"),
                 question=market_data.get("question", ""),
                 description=market_data.get("description", ""),
                 end_date=end_date,
                 category=market_data.get("category", ""),
-                token_id_yes=yes_token.get("token_id", ""),
-                token_id_no=no_token.get("token_id", ""),
-                price_yes=float(yes_token.get("price", 0)),
-                price_no=float(no_token.get("price", 0)),
+                token_id_yes=token_id_yes,
+                token_id_no=token_id_no,
+                price_yes=price_yes,
+                price_no=price_no,
                 volume_24h=float(market_data.get("volume24hr", 0) or market_data.get("volume", 0)),
-                liquidity=float(market_data.get("liquidity", 0)),
-                active=market_data.get("active", True)
+                liquidity=float(market_data.get("liquidity", 0) or market_data.get("liquidityNum", 0)),
+                active=not market_data.get("closed", False)
             )
         except Exception as e:
             logger.error(f"Failed to parse market info: {e}")
