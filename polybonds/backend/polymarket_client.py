@@ -146,20 +146,10 @@ class PolymarketClient:
                 return False
 
             # Re-apply signature_type after set_api_creds (it may reset internal state)
-            if hasattr(self._clob_client, 'signer') and self._clob_client.signer is not None:
-                self._clob_client.signer.signature_type = self.settings.polymarket_signature_type
-                logger.info(f"Re-set signature_type after set_api_creds: {self.settings.polymarket_signature_type}")
-
-            # Also check if there's a builder or order_builder that needs signature_type
-            if hasattr(self._clob_client, 'builder') and self._clob_client.builder is not None:
-                if hasattr(self._clob_client.builder, 'signer') and self._clob_client.builder.signer is not None:
-                    self._clob_client.builder.signer.signature_type = self.settings.polymarket_signature_type
-                    logger.info("Also set signature_type on builder.signer")
-
-            if hasattr(self._clob_client, 'order_builder') and self._clob_client.order_builder is not None:
-                if hasattr(self._clob_client.order_builder, 'signer') and self._clob_client.order_builder.signer is not None:
-                    self._clob_client.order_builder.signer.signature_type = self.settings.polymarket_signature_type
-                    logger.info("Also set signature_type on order_builder.signer")
+            # Comprehensive fix: patch ALL signer references in the client
+            sig_type = self.settings.polymarket_signature_type
+            self._patch_all_signers(self._clob_client, sig_type)
+            logger.info(f"Patched all signers with signature_type={sig_type}")
 
             self._authenticated = True
 
@@ -172,6 +162,37 @@ class PolymarketClient:
             logger.error(f"Init error traceback: {traceback.format_exc()}")
             return False
     
+    def _patch_all_signers(self, obj, signature_type: int, visited: set = None, path: str = "root"):
+        """
+        Recursively find and patch all signer objects with signature_type.
+        This fixes a bug in py-clob-client where signature_type isn't set properly.
+        """
+        if visited is None:
+            visited = set()
+
+        obj_id = id(obj)
+        if obj_id in visited:
+            return
+        visited.add(obj_id)
+
+        # Check if this object is a Signer
+        if hasattr(obj, 'sign') and hasattr(obj, 'private_key'):
+            # This looks like a Signer
+            if not hasattr(obj, 'signature_type') or obj.signature_type is None:
+                obj.signature_type = signature_type
+                logger.info(f"Patched signer at {path}: set signature_type={signature_type}")
+            else:
+                logger.debug(f"Signer at {path} already has signature_type={obj.signature_type}")
+
+        # Recursively check attributes
+        attrs_to_check = ['signer', 'builder', 'order_builder', '_signer', '_builder',
+                         'l2_client', '_l2_client', 'client', '_client']
+        for attr in attrs_to_check:
+            if hasattr(obj, attr):
+                child = getattr(obj, attr)
+                if child is not None:
+                    self._patch_all_signers(child, signature_type, visited, f"{path}.{attr}")
+
     @property
     def is_authenticated(self) -> bool:
         """Check if client is authenticated for trading."""
@@ -564,6 +585,7 @@ class PolymarketClient:
     def get_balance(self) -> Optional[float]:
         """
         Get USDC balance from the Polymarket account.
+        Uses direct HTTP call to bypass py-clob-client bug.
 
         Returns:
             Balance in USDC or None if unavailable
@@ -576,52 +598,67 @@ class PolymarketClient:
             logger.warning("CLOB client not authenticated - cannot get balance")
             return None
 
+        # Get API credentials
+        creds = getattr(self._clob_client, 'creds', None)
+        if not creds or not creds.api_key:
+            logger.warning("No API credentials available")
+            return None
+
         try:
-            # Debug: check signer status
-            if hasattr(self._clob_client, 'signer'):
-                signer = self._clob_client.signer
-                if signer is None:
-                    logger.warning("CLOB signer is None - cannot get balance")
-                    return None
-                if not hasattr(signer, 'signature_type'):
-                    logger.warning(f"Signer missing signature_type attr. Signer type: {type(signer)}")
-                    return None
-                logger.debug(f"Signer OK: type={type(signer)}, sig_type={getattr(signer, 'signature_type', 'N/A')}")
+            # Make direct HTTP call to balance endpoint
+            # This bypasses the buggy get_balance_allowance() method
+            import time
+            import hmac
+            import hashlib
+            import base64
 
-            # Debug: check if creds are set
-            if hasattr(self._clob_client, 'creds') and self._clob_client.creds:
-                logger.debug(f"CLOB creds available, api_key exists: {bool(self._clob_client.creds.api_key)}")
-            else:
-                logger.warning("CLOB creds not set on client")
-                return None
+            timestamp = str(int(time.time()))
+            method = "GET"
+            path = "/balance-allowance?asset_type=USDC"
 
-            # Try to get balance from CLOB client
-            logger.info("Attempting to call get_balance_allowance()...")
-            balance_info = self._clob_client.get_balance_allowance()
-            logger.info(f"Balance info response: {balance_info}, type: {type(balance_info)}")
-            if balance_info is None:
-                logger.warning("get_balance_allowance() returned None")
-                return None
-            if isinstance(balance_info, dict) and 'balance' in balance_info:
-                # Balance is in wei (6 decimals for USDC)
-                bal = float(balance_info['balance']) / 1e6
-                logger.info(f"Parsed balance: {bal} USDC")
-                return bal
+            # Create signature for L1 auth (API key auth)
+            message = f"{timestamp}{method}{path}"
+            signature = hmac.new(
+                base64.b64decode(creds.api_secret),
+                message.encode('utf-8'),
+                hashlib.sha256
+            ).digest()
+            sig_b64 = base64.b64encode(signature).decode('utf-8')
+
+            headers = {
+                "POLY_ADDRESS": creds.api_key,
+                "POLY_SIGNATURE": sig_b64,
+                "POLY_TIMESTAMP": timestamp,
+                "POLY_PASSPHRASE": creds.api_passphrase,
+            }
+
+            url = f"{self.settings.clob_api_url}{path}"
+            logger.info(f"Fetching balance from: {url}")
+
+            response = self._http_client.get(url, headers=headers)
+            logger.info(f"Balance response status: {response.status_code}")
+
+            if response.status_code == 200:
+                data = response.json()
+                logger.info(f"Balance response data: {data}")
+                if isinstance(data, dict) and 'balance' in data:
+                    bal = float(data['balance']) / 1e6  # USDC has 6 decimals
+                    logger.info(f"Parsed balance: {bal} USDC")
+                    return bal
+                elif isinstance(data, dict):
+                    # Try other possible keys
+                    for key in ['balance', 'available', 'total']:
+                        if key in data:
+                            bal = float(data[key]) / 1e6
+                            logger.info(f"Parsed balance from '{key}': {bal} USDC")
+                            return bal
             else:
-                logger.warning(f"Unexpected balance response format: {balance_info}")
-        except AttributeError as e:
-            if 'signature_type' in str(e):
-                logger.error(f"Signer not properly initialized - signature_type missing: {e}")
-                # Check signer state for debugging
-                if hasattr(self._clob_client, 'signer'):
-                    s = self._clob_client.signer
-                    logger.error(f"Signer debug: is_none={s is None}, type={type(s)}, attrs={dir(s) if s else 'N/A'}")
-            else:
-                logger.warning(f"Could not get balance (AttributeError): {e}")
+                logger.warning(f"Balance request failed: {response.status_code} - {response.text}")
+
         except Exception as e:
-            logger.warning(f"Could not get balance from CLOB: {e}")
+            logger.error(f"Failed to get balance: {e}")
             import traceback
-            logger.debug(f"Balance error traceback: {traceback.format_exc()}")
+            logger.error(f"Balance error traceback: {traceback.format_exc()}")
 
         return None
     
