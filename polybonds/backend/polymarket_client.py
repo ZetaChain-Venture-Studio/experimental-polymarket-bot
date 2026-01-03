@@ -90,9 +90,14 @@ class PolymarketClient:
                 return True
             
             # Level 1 & 2: Full authentication for trading
+            # Ensure private key has 0x prefix
+            private_key = self.settings.polymarket_private_key
+            if not private_key.startswith('0x'):
+                private_key = '0x' + private_key
+
             self._clob_client = ClobClient(
                 host=self.settings.clob_api_url,
-                key=self.settings.polymarket_private_key,
+                key=private_key,
                 chain_id=self.settings.polymarket_chain_id,
                 signature_type=self.settings.polymarket_signature_type,
                 funder=self.settings.polymarket_funder_address
