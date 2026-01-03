@@ -165,7 +165,8 @@ class PolymarketClient:
     def _patch_all_signers(self, obj, signature_type: int, visited: set = None, path: str = "root"):
         """
         Recursively find and patch all signer objects with signature_type.
-        This fixes a bug in py-clob-client where signature_type isn't set properly.
+        Also patches OrderBuilder objects with sig_type.
+        This fixes bugs in py-clob-client where signature_type/sig_type aren't set properly.
         """
         if visited is None:
             visited = set()
@@ -183,6 +184,14 @@ class PolymarketClient:
                 logger.info(f"Patched signer at {path}: set signature_type={signature_type}")
             else:
                 logger.debug(f"Signer at {path} already has signature_type={obj.signature_type}")
+
+        # Check if this object is an OrderBuilder (has sig_type attribute)
+        if hasattr(obj, 'sig_type'):
+            if obj.sig_type is None:
+                obj.sig_type = signature_type
+                logger.info(f"Patched builder at {path}: set sig_type={signature_type}")
+            else:
+                logger.debug(f"Builder at {path} already has sig_type={obj.sig_type}")
 
         # Recursively check attributes
         attrs_to_check = ['signer', 'builder', 'order_builder', '_signer', '_builder',
@@ -617,36 +626,52 @@ class PolymarketClient:
             logger.warning("No API credentials available")
             return None
 
+        # Get signer for wallet address
+        signer = getattr(self._clob_client, 'signer', None)
+        if not signer:
+            logger.warning("No signer available for wallet address")
+            return None
+
         try:
+            # Get wallet address from signer
+            wallet_address = signer.address()
+            logger.info(f"Using wallet address: {wallet_address[:20]}...")
+
             # Make direct HTTP call to balance endpoint
             # This bypasses the buggy get_balance_allowance() method
             import time
-            import hmac
+            import hmac as hmac_module
             import hashlib
             import base64
 
             timestamp = str(int(time.time()))
             method = "GET"
-            path = "/balance-allowance?asset_type=USDC"
+            request_path = "/balance-allowance?asset_type=USDC"
 
-            # Create signature for L1 auth (API key auth)
-            message = f"{timestamp}{method}{path}"
-            signature = hmac.new(
-                base64.b64decode(creds.api_secret),
+            # Create HMAC signature for L2 auth (uses urlsafe base64)
+            message = f"{timestamp}{method}{request_path}"
+
+            # Decode secret using urlsafe_b64decode (matches library implementation)
+            secret_bytes = base64.urlsafe_b64decode(creds.api_secret)
+            signature = hmac_module.new(
+                secret_bytes,
                 message.encode('utf-8'),
                 hashlib.sha256
             ).digest()
-            sig_b64 = base64.b64encode(signature).decode('utf-8')
+            sig_b64 = base64.urlsafe_b64encode(signature).decode('utf-8')
 
+            # Level 2 headers (requires both POLY_ADDRESS and POLY_API_KEY)
             headers = {
-                "POLY_ADDRESS": creds.api_key,
+                "POLY_ADDRESS": wallet_address,
                 "POLY_SIGNATURE": sig_b64,
                 "POLY_TIMESTAMP": timestamp,
+                "POLY_API_KEY": creds.api_key,
                 "POLY_PASSPHRASE": creds.api_passphrase,
             }
 
-            url = f"{self.settings.clob_api_url}{path}"
+            url = f"{self.settings.clob_api_url}{request_path}"
             logger.info(f"Fetching balance from: {url}")
+            logger.debug(f"Balance headers: POLY_ADDRESS={wallet_address[:20]}..., POLY_API_KEY={creds.api_key[:20]}...")
 
             response = self._http_client.get(url, headers=headers)
             logger.info(f"Balance response status: {response.status_code}")

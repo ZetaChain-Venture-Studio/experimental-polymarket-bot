@@ -486,6 +486,91 @@ async def get_logs(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/debug/test-trade", tags=["System"])
+async def debug_test_trade(amount_usd: float = 1.0) -> Dict[str, Any]:
+    """
+    Test trade functionality without actually executing.
+    Creates a signed order and validates it can be created.
+    """
+    import traceback
+
+    result = {
+        "success": False,
+        "balance": None,
+        "opportunities_count": 0,
+        "test_opportunity": None,
+        "order_created": False,
+        "errors": []
+    }
+
+    try:
+        # Step 1: Check balance
+        if not client.is_authenticated:
+            init_success = client.initialize(read_only=False)
+            if not init_success:
+                result["errors"].append("Failed to initialize client")
+                return result
+
+        balance = client.get_balance()
+        result["balance"] = balance
+        if balance is None:
+            result["errors"].append("Could not fetch balance")
+
+        # Step 2: Find opportunities
+        opportunities = scanner.scan_all_markets()
+        result["opportunities_count"] = len(opportunities)
+
+        if not opportunities:
+            result["errors"].append("No opportunities found")
+            return result
+
+        # Step 3: Get first opportunity
+        opp = opportunities[0]
+        result["test_opportunity"] = {
+            "market_id": opp.market_id,
+            "question": opp.question[:60] + "...",
+            "price": opp.current_price,
+            "side": opp.side,
+            "token_id": opp.token_id[:20] + "...",
+        }
+
+        # Step 4: Try to create an order (but don't post it)
+        try:
+            from py_clob_client.clob_types import OrderArgs
+            from py_clob_client.order_builder.constants import BUY
+
+            quantity = amount_usd / opp.current_price
+            limit_price = min(opp.current_price + 0.005, 0.995)
+
+            order_args = OrderArgs(
+                token_id=opp.token_id,
+                price=limit_price,
+                size=quantity,
+                side=BUY
+            )
+
+            # Try to create (sign) the order
+            signed_order = client._clob_client.create_order(order_args)
+            result["order_created"] = True
+            result["signed_order"] = {
+                "order_id": str(signed_order.order.orderId) if hasattr(signed_order, 'order') else "N/A",
+                "signature_present": bool(getattr(signed_order, 'signature', None)),
+            }
+            result["success"] = True
+            result["message"] = "Order creation test successful! Trading should work."
+
+        except Exception as order_error:
+            result["errors"].append(f"Order creation failed: {order_error}")
+            result["order_traceback"] = traceback.format_exc()
+
+        return result
+
+    except Exception as e:
+        result["errors"].append(f"Test trade error: {e}")
+        result["traceback"] = traceback.format_exc()
+        return result
+
+
 @app.get("/api/debug/auth", tags=["System"])
 async def debug_auth() -> Dict[str, Any]:
     """Debug authentication status and test CLOB client."""
@@ -501,6 +586,8 @@ async def debug_auth() -> Dict[str, Any]:
         "chain_id": 0,
         "signature_type": 0,
         "balance": None,
+        "wallet_address": None,
+        "api_key": None,
         "errors": []
     }
 
@@ -520,6 +607,7 @@ async def debug_auth() -> Dict[str, Any]:
         result["funder_address"] = settings.polymarket_funder_address[:20] + "..." if settings.polymarket_funder_address else ""
         result["chain_id"] = settings.polymarket_chain_id
         result["signature_type"] = settings.polymarket_signature_type
+        result["auto_trading_enabled"] = settings.auto_trading_enabled
 
         # Check client state
         result["client_initialized"] = client._clob_client is not None
@@ -533,15 +621,27 @@ async def debug_auth() -> Dict[str, Any]:
                 "has_creds": hasattr(clob, 'creds') and clob.creds is not None,
                 "host": getattr(clob, 'host', None),
             }
+
             # Check signer details
             if hasattr(clob, 'signer') and clob.signer is not None:
-                result["clob_internal"]["signer_address"] = str(getattr(clob.signer, 'address', 'unknown'))[:20] + "..."
-            # Check if signer has signature_type
-            if hasattr(clob, 'signer'):
                 signer = clob.signer
-                result["clob_internal"]["signer_has_signature_type"] = hasattr(signer, 'signature_type') if signer else False
-                if signer and hasattr(signer, 'signature_type'):
+                try:
+                    wallet_addr = signer.address()
+                    result["wallet_address"] = wallet_addr[:20] + "..." if wallet_addr else None
+                    result["clob_internal"]["signer_address"] = wallet_addr
+                except Exception as addr_err:
+                    result["errors"].append(f"Failed to get signer address: {addr_err}")
+
+                result["clob_internal"]["signer_has_signature_type"] = hasattr(signer, 'signature_type')
+                if hasattr(signer, 'signature_type'):
                     result["clob_internal"]["signer_signature_type"] = signer.signature_type
+
+            # Check API credentials
+            if hasattr(clob, 'creds') and clob.creds is not None:
+                creds = clob.creds
+                result["api_key"] = creds.api_key[:20] + "..." if creds.api_key else None
+                result["clob_internal"]["has_api_secret"] = bool(creds.api_secret)
+                result["clob_internal"]["has_passphrase"] = bool(creds.api_passphrase)
 
         # If not authenticated, try to reinitialize
         if not client.is_authenticated:
@@ -550,6 +650,17 @@ async def debug_auth() -> Dict[str, Any]:
                 init_result = client.initialize(read_only=False)
                 result["init_result"] = init_result
                 result["authenticated_after_init"] = client.is_authenticated
+
+                # Get updated info after init
+                if client._clob_client is not None:
+                    clob = client._clob_client
+                    if hasattr(clob, 'signer') and clob.signer is not None:
+                        try:
+                            result["wallet_address"] = clob.signer.address()[:20] + "..."
+                        except:
+                            pass
+                    if hasattr(clob, 'creds') and clob.creds is not None:
+                        result["api_key"] = clob.creds.api_key[:20] + "..."
             except Exception as init_error:
                 result["errors"].append(f"Init error: {init_error}")
                 result["init_traceback"] = traceback.format_exc()
@@ -559,8 +670,10 @@ async def debug_auth() -> Dict[str, Any]:
             try:
                 balance = client.get_balance()
                 result["balance"] = balance
+                result["balance_status"] = "success" if balance is not None else "failed"
             except Exception as balance_error:
                 result["errors"].append(f"Balance error: {balance_error}")
+                result["balance_traceback"] = traceback.format_exc()
 
         return result
 
