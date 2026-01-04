@@ -122,7 +122,6 @@ class PortfolioResponse(BaseModel):
 
 
 class ExecuteTradeRequest(BaseModel):
-    market_id: str
     amount_usd: Optional[float] = None
 
 
