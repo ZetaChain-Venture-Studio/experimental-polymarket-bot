@@ -19,9 +19,9 @@ class Settings(BaseSettings):
         ...,
         description="Private key for Polymarket wallet (without 0x prefix)"
     )
-    polymarket_funder_address: str = Field(
-        ...,
-        description="Wallet address that holds funds on Polymarket"
+    polymarket_funder_address: Optional[str] = Field(
+        default=None,
+        description="Wallet address that holds funds (only needed for proxy wallets)"
     )
     polymarket_chain_id: int = Field(
         default=137,

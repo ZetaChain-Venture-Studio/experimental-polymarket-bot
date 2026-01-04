@@ -99,17 +99,30 @@ class PolymarketClient:
             if not private_key.startswith('0x'):
                 private_key = '0x' + private_key
 
-            logger.info(f"Initializing CLOB with chain_id={self.settings.polymarket_chain_id}, sig_type={self.settings.polymarket_signature_type}")
-            logger.info(f"Private key length: {len(private_key)}, starts with 0x: {private_key.startswith('0x')}")
-            logger.info(f"Funder address: {self.settings.polymarket_funder_address[:10]}...")
+            sig_type = self.settings.polymarket_signature_type
+            funder = self.settings.polymarket_funder_address
 
-            self._clob_client = ClobClient(
-                host=self.settings.clob_api_url,
-                key=private_key,
-                chain_id=self.settings.polymarket_chain_id,
-                signature_type=self.settings.polymarket_signature_type,
-                funder=self.settings.polymarket_funder_address
-            )
+            logger.info(f"Initializing CLOB with chain_id={self.settings.polymarket_chain_id}, sig_type={sig_type}")
+            logger.info(f"Private key length: {len(private_key)}, starts with 0x: {private_key.startswith('0x')}")
+            logger.info(f"Funder address: {funder[:10] + '...' if funder else 'None (EOA mode)'}")
+
+            # For EOA mode (sig_type=0), don't pass funder - wallet IS the funder
+            if sig_type == 0 or not funder:
+                self._clob_client = ClobClient(
+                    host=self.settings.clob_api_url,
+                    key=private_key,
+                    chain_id=self.settings.polymarket_chain_id,
+                    signature_type=sig_type
+                )
+            else:
+                # Proxy wallet mode - pass funder address
+                self._clob_client = ClobClient(
+                    host=self.settings.clob_api_url,
+                    key=private_key,
+                    chain_id=self.settings.polymarket_chain_id,
+                    signature_type=sig_type,
+                    funder=funder
+                )
 
             # Workaround: Ensure signer has signature_type attribute
             # Some versions of py-clob-client don't set this properly
