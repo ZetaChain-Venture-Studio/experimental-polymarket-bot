@@ -621,7 +621,7 @@ class PolymarketClient:
     def get_balance(self) -> Optional[float]:
         """
         Get USDC balance from the Polymarket account.
-        Uses direct HTTP call to bypass py-clob-client bug.
+        Tries library method first, falls back to direct HTTP call.
 
         Returns:
             Balance in USDC or None if unavailable
@@ -634,48 +634,43 @@ class PolymarketClient:
             logger.warning("CLOB client not authenticated - cannot get balance")
             return None
 
-        # Get API credentials
-        creds = getattr(self._clob_client, 'creds', None)
-        if not creds or not creds.api_key:
-            logger.warning("No API credentials available")
-            return None
+        # Try 1: Use library's built-in method
+        try:
+            logger.info("Trying library's get_balance_allowance method...")
+            result = self._clob_client.get_balance_allowance()
+            logger.info(f"Library balance result: {result}")
+            if result and isinstance(result, dict):
+                if 'balance' in result:
+                    bal = float(result['balance']) / 1e6
+                    logger.info(f"Got balance via library: {bal} USDC")
+                    return bal
+        except Exception as lib_err:
+            logger.warning(f"Library method failed: {lib_err}")
+            self._last_balance_error = f"Library: {str(lib_err)}"
 
-        # Get signer for wallet address
+        # Try 2: Direct HTTP call with signer address (original credentials are tied to signer)
+        creds = getattr(self._clob_client, 'creds', None)
         signer = getattr(self._clob_client, 'signer', None)
-        if not signer:
-            logger.warning("No signer available for wallet address")
+
+        if not creds or not creds.api_key or not signer:
+            logger.warning("Missing credentials or signer for HTTP fallback")
             return None
 
         try:
-            # For proxy wallets (signature_type=1), use funder address for API calls
-            # For EOA (signature_type=0), use signer address
-            sig_type = self.settings.polymarket_signature_type
-            if sig_type == 1 and self.settings.polymarket_funder_address:
-                wallet_address = self.settings.polymarket_funder_address
-                logger.info(f"Using FUNDER address for proxy wallet: {wallet_address}")
-            else:
-                wallet_address = signer.address()
-                logger.info(f"Using SIGNER address: {wallet_address}")
-
-            # Use the library's signing function for correct HMAC
             from py_clob_client.signing.hmac import build_hmac_signature
-            from datetime import datetime
+
+            # Always use SIGNER address - that's where API creds are registered
+            wallet_address = signer.address()
+            logger.info(f"HTTP fallback using signer address: {wallet_address}")
 
             timestamp = int(datetime.now().timestamp())
-            method = "GET"
-            # Include signature_type in query params (required by Polymarket API)
+            sig_type = self.settings.polymarket_signature_type
             request_path = f"/balance-allowance?asset_type=USDC&signature_type={sig_type}"
 
-            # Use library's HMAC function
             hmac_sig = build_hmac_signature(
-                creds.api_secret,
-                timestamp,
-                method,
-                request_path,
-                None  # No body for GET request
+                creds.api_secret, timestamp, "GET", request_path, None
             )
 
-            # Level 2 headers (requires both POLY_ADDRESS and POLY_API_KEY)
             headers = {
                 "POLY_ADDRESS": wallet_address,
                 "POLY_SIGNATURE": hmac_sig,
@@ -685,37 +680,25 @@ class PolymarketClient:
             }
 
             url = f"{self.settings.clob_api_url}{request_path}"
-            logger.info(f"Fetching balance from: {url}")
-            logger.info(f"Headers: POLY_ADDRESS={wallet_address}, POLY_API_KEY={creds.api_key[:20]}..., ts={timestamp}")
+            logger.info(f"HTTP request to: {url}")
 
             response = self._http_client.get(url, headers=headers)
-            logger.info(f"Balance response status: {response.status_code}")
+            logger.info(f"HTTP response: {response.status_code}")
 
             if response.status_code == 200:
                 data = response.json()
-                logger.info(f"Balance response data: {data}")
-                if isinstance(data, dict) and 'balance' in data:
-                    bal = float(data['balance']) / 1e6  # USDC has 6 decimals
-                    logger.info(f"Parsed balance: {bal} USDC")
+                logger.info(f"HTTP balance data: {data}")
+                if 'balance' in data:
+                    bal = float(data['balance']) / 1e6
                     return bal
-                elif isinstance(data, dict):
-                    # Try other possible keys
-                    for key in ['balance', 'available', 'total']:
-                        if key in data:
-                            bal = float(data[key]) / 1e6
-                            logger.info(f"Parsed balance from '{key}': {bal} USDC")
-                            return bal
-                    # If we got here, log the full response for debugging
-                    logger.warning(f"Balance response 200 but unexpected format: {data}")
             else:
-                logger.error(f"Balance request failed: {response.status_code} - {response.text[:500]}")
-                # Store last error for debugging
                 self._last_balance_error = f"HTTP {response.status_code}: {response.text[:200]}"
+                logger.error(f"HTTP balance failed: {self._last_balance_error}")
 
         except Exception as e:
-            logger.error(f"Failed to get balance: {e}")
+            logger.error(f"HTTP fallback failed: {e}")
             import traceback
-            logger.error(f"Balance error traceback: {traceback.format_exc()}")
+            logger.error(traceback.format_exc())
 
         return None
     
