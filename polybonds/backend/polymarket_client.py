@@ -647,9 +647,15 @@ class PolymarketClient:
             return None
 
         try:
-            # Get wallet address from signer
-            wallet_address = signer.address()
-            logger.info(f"Using wallet address: {wallet_address}")
+            # For proxy wallets (signature_type=1), use funder address for API calls
+            # For EOA (signature_type=0), use signer address
+            sig_type = self.settings.polymarket_signature_type
+            if sig_type == 1 and self.settings.polymarket_funder_address:
+                wallet_address = self.settings.polymarket_funder_address
+                logger.info(f"Using FUNDER address for proxy wallet: {wallet_address}")
+            else:
+                wallet_address = signer.address()
+                logger.info(f"Using SIGNER address: {wallet_address}")
 
             # Use the library's signing function for correct HMAC
             from py_clob_client.signing.hmac import build_hmac_signature
@@ -658,7 +664,6 @@ class PolymarketClient:
             timestamp = int(datetime.now().timestamp())
             method = "GET"
             # Include signature_type in query params (required by Polymarket API)
-            sig_type = self.settings.polymarket_signature_type
             request_path = f"/balance-allowance?asset_type=USDC&signature_type={sig_type}"
 
             # Use library's HMAC function
